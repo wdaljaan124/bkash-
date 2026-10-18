@@ -1,2 +1,84 @@
-# bkash-
-DumboMax-Production-APK
+
+name: DumboMax APK Release Build
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Find Flutter Android app
+        shell: bash
+        run: |
+          PROJECT_DIR=""
+          while IFS= read -r -d '' f; do
+            dir=$(dirname "$f")
+            if [ -f "$dir/android/app/build.gradle" ]; then
+              PROJECT_DIR="$dir"
+              break
+            fi
+          done < <(find . -name pubspec.yaml -not -path '*/.dart_tool/*' -not -path '*/build/*' -print0)
+
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "ERROR: No Flutter Android app found."
+            exit 1
+          fi
+
+          echo "Found Flutter app in: $PROJECT_DIR"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+      - name: Decode Keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        if: env.KEYSTORE_BASE64 != ''
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > "${{ env.PROJECT_DIR }}/android/app/upload-keystore.jks"
+
+      - name: Install dependencies
+        run: flutter pub get
+        working-directory: ${{ env.PROJECT_DIR }}
+
+      - name: Build APK (Release Production)
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        # يقوم بالبناء والتوقيع التلقائي
+        run: flutter build apk --release --split-per-abi
+        working-directory: ${{ env.PROJECT_DIR }}
+
+      - name: Prepare Production APKs
+        run: |
+          mkdir -p "${GITHUB_WORKSPACE}/release-apks"
+          find "${{ env.PROJECT_DIR }}/build/app/outputs/flutter-apk/" -name "*.apk" -exec cp {} "${GITHUB_WORKSPACE}/release-apks/" \;
+          echo "Production APKs copied successfully"
+      
+      - name: Upload Production APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: DumboMax-Production-APKs
+          path: release-apks/*.apk
+          if-no-files-found: error
