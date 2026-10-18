@@ -32,17 +32,38 @@ jobs:
       - name: Find Flutter Android app
         shell: bash
         run: |
+          # Allow manual override if PROJECT_DIR is already set (e.g., via env or workflow input)
+          if [ -n "$PROJECT_DIR" ]; then
+            echo "Using provided PROJECT_DIR=$PROJECT_DIR"
+            echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
           PROJECT_DIR=""
+          PROJECT_DIR_FALLBACK=""
           while IFS= read -r -d '' f; do
             dir=$(dirname "$f")
-            if [ -f "$dir/android/app/build.gradle" ]; then
+            # Prefer a project that contains android/app/build.gradle or build.gradle.kts
+            if [ -f "$dir/android/app/build.gradle" ] || [ -f "$dir/android/app/build.gradle.kts" ]; then
               PROJECT_DIR="$dir"
               break
             fi
+            # Fallback: if android/app exists but gradle files are missing, remember it
+            if [ -d "$dir/android/app" ] && [ -z "$PROJECT_DIR_FALLBACK" ]; then
+              PROJECT_DIR_FALLBACK="$dir"
+            fi
           done < <(find . -name pubspec.yaml -not -path '*/.dart_tool/*' -not -path '*/build/*' -print0)
+
+          if [ -z "$PROJECT_DIR" ] && [ -n "$PROJECT_DIR_FALLBACK" ]; then
+            echo "Warning: found android/app directory without build.gradle in: $PROJECT_DIR_FALLBACK"
+            echo "Using it as PROJECT_DIR, but build may fail if Gradle files are missing."
+            PROJECT_DIR="$PROJECT_DIR_FALLBACK"
+          fi
 
           if [ -z "$PROJECT_DIR" ]; then
             echo "ERROR: No Flutter Android app found."
+            echo "Candidates (pubspec.yaml):"
+            find . -name pubspec.yaml -not -path '*/.dart_tool/*' -not -path '*/build/*' -print
             exit 1
           fi
 
